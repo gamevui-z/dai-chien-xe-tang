@@ -23,11 +23,12 @@ jobs:
           grep -q 'GV_BUILD", 3' gamevui-save.js
           grep -q 'gamevui-save.js?v=3' index.html
           grep -q 'GV_LOAD_RETRY' gamevui-save.js
+          grep -q 'return withTimeout(getHistory(), 5000)' gamevui-save.js
       - name: Commit patched runtime
         run: |
           git config user.name 'gamevui-bot'
           git config user.email 'gamevui-bot@users.noreply.github.com'
           git add gamevui-save.js index.html
           if git diff --cached --quiet; then exit 0; fi
-          git commit -m 'fix: harden cross-device cloud save and score source'
+          git commit -m 'fix: correct cloud load retry and cross-device sync'
           git push origin HEAD:main
