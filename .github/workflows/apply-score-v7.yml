@@ -1,0 +1,46 @@
+name: Apply score v7
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('game.js'); s=p.read_text()
+          old='''    function _JS_FileSystem_Initialize() {\n        Module.setInterval(function() {\n            fs.sync(true)\n        }, fs.syncInternal)\n    }'''
+          new='''    function _JS_FileSystem_Initialize() {\n        if (typeof window !== "undefined") window.__gvUnityFsSync = function(done) {\n            try { fs.sync(false); Module.setTimeout(function(){ if (typeof done === "function") done(); }, 1300); return true }\n            catch (e) { try { if (typeof done === "function") done(e); } catch (e2) {} return false }\n        };\n        Module.setInterval(function() {\n            fs.sync(true)\n        }, fs.syncInternal)\n    }'''
+          if old not in s: raise SystemExit('game.js marker missing')
+          p.write_text(s.replace(old,new,1))
+
+          p=Path('gamevui-save.js'); s=p.read_text()
+          if 'gvLog("GV_BUILD", 6);' not in s: raise SystemExit('build marker missing')
+          s=s.replace('gvLog("GV_BUILD", 6);','gvLog("GV_BUILD", 7);',1)
+          old="""\tfunction requestUnityFsSync() {\n\t\treturn new Promise(function (resolve) {\n\t\t\tvar inst = window.__gvUnityInstance;"""
+          new="""\tfunction requestUnityFsSync() {\n\t\treturn new Promise(function (resolve) {\n\t\t\ttry {\n\t\t\t\tif (typeof window.__gvUnityFsSync === 'function') {\n\t\t\t\t\tgvLog('GV_UNITY_FS_SYNC','bridge');\n\t\t\t\t\tvar done=false, finish=function(){ if(!done){ done=true; resolve(); } };\n\t\t\t\t\twindow.__gvUnityFsSync(finish);\n\t\t\t\t\tsetTimeout(finish,2200);\n\t\t\t\t\treturn;\n\t\t\t\t}\n\t\t\t} catch(e0) {}\n\t\t\tvar inst = window.__gvUnityInstance;"""
+          if old not in s: raise SystemExit('sync marker missing')
+          p.write_text(s.replace(old,new,1))
+
+          p=Path('index.html'); s=p.read_text()
+          if 'gamevui-save.js?v=6' not in s: raise SystemExit('index marker missing')
+          s=s.replace('gamevui-save.js?v=6','gamevui-save.js?v=7',1)
+          old='''            function SetLeaderboardScores(_name, score) {\n                try'''
+          new='''            function SetLeaderboardScores(_name, score) {\n                if (window.__gvLog) window.__gvLog("GV_LB_RUNTIME", String(_name), Number(score));\n                try'''
+          if old not in s: raise SystemExit('leaderboard marker missing')
+          p.write_text(s.replace(old,new,1))
+          PY
+          node --check game.js
+          node --check gamevui-save.js
+          grep -q '__gvUnityFsSync' game.js
+          grep -q 'GV_BUILD", 7' gamevui-save.js
+          grep -q 'gamevui-save.js?v=7' index.html
+          git diff --check
+          git config user.name gamevui-bot
+          git config user.email gamevui-bot@users.noreply.github.com
+          git add game.js gamevui-save.js index.html
+          git commit -m 'fix: flush Unity IDBFS before score read'
+          git push
