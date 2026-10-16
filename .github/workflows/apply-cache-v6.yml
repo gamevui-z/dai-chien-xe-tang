@@ -1,0 +1,52 @@
+name: Apply cache v6
+on:
+  push:
+    paths:
+      - '.github/workflows/apply-cache-v6.yml'
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Bump runtime to v6
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('gamevui-save.js')
+          s = p.read_text()
+          if 'gvLog("GV_BUILD", 5);' not in s:
+              raise SystemExit('GV_BUILD 5 marker missing')
+          s = s.replace('gvLog("GV_BUILD", 5);', 'gvLog("GV_BUILD", 6);', 1)
+          p.write_text(s)
+
+          h = Path('index.html')
+          t = h.read_text()
+          if 'gamevui-save.js?v=5' not in t:
+              raise SystemExit('v5 script marker missing')
+          t = t.replace('gamevui-save.js?v=5', 'gamevui-save.js?v=6', 1)
+          h.write_text(t)
+          PY
+      - name: Validate runtime
+        run: |
+          node --check gamevui-save.js
+          grep -q 'GV_BUILD", 6' gamevui-save.js
+          grep -q 'gamevui-save.js?v=6' index.html
+          grep -q 'GV_UNITY_FS_SYNC' gamevui-save.js
+          grep -q 'moneyishFromRaw' gamevui-save.js
+          grep -q '__gvUnityInstance' index.html
+      - name: Commit v6 and clean temporary tooling
+        run: |
+          git config user.name 'gamevui-bot'
+          git config user.email 'gamevui-bot@users.noreply.github.com'
+          rm -f .github/scripts/patch_v5_score.py
+          rm -f .github/workflows/apply-score-v5.yml
+          rm -f .github/workflows/apply-score-v5-rerun.yml
+          rm -f .github/workflows/apply-cache-v6.yml
+          git add -A
+          git diff --cached --check
+          git commit -m 'chore: bump GameVui adapter to v6 for fresh deployment'
+          git push origin HEAD:main
