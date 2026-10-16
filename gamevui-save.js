@@ -440,6 +440,15 @@
 
 	function requestUnityFsSync() {
 		return new Promise(function (resolve) {
+			try {
+				if (typeof window.__gvUnityFsSync === 'function') {
+					gvLog('GV_UNITY_FS_SYNC','bridge');
+					var done=false, finish=function(){ if(!done){ done=true; resolve(); } };
+					window.__gvUnityFsSync(finish);
+					setTimeout(finish,2200);
+					return;
+				}
+			} catch(e0) {}
 			var inst = window.__gvUnityInstance;
 			var mod = inst && inst.Module;
 			try {
@@ -1269,7 +1278,7 @@
 	}
 
 	function init() {
-		gvLog("GV_BUILD", 6);
+		gvLog("GV_BUILD", 7);
 		state.gameDir = "/idbfs/" + md5Hex(documentDirUrl());
 		gvLog("GV_GAMEDIR", state.gameDir);
 		if (saveOff) {

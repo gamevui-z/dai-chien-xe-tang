@@ -10,7 +10,7 @@
         <!-- <script type="text/javascript">document.domain = '4399.com'</script> -->
 		<title>Đại chiến xe tăng</title>
 		<script type="text/javascript" src="//www.gamevui.com/games/services/score.min.js?fullscreen=0"></script>
-		<script type="text/javascript" src="gamevui-save.js?v=6"></script>
+		<script type="text/javascript" src="gamevui-save.js?v=7"></script>
         <style>
             /* Убираем выделение по нажатию клавиш */
             canvas:focus {
@@ -586,6 +586,7 @@
             }
 
             function SetLeaderboardScores(_name, score) {
+                if (window.__gvLog) window.__gvLog("GV_LB_RUNTIME", String(_name), Number(score));
                 try
                 {
                     ysdk.getLeaderboards()
