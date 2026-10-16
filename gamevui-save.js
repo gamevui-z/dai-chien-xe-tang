@@ -7,7 +7,7 @@
 	var META_KEY = "gv_tank_meta";
 	var MAX_SMALL = 524288;
 	var MAX_RECORD_CHARS = 500000;
-	var MONEY_KEYS = ["playermoney", "money", "softmoney", "coins", "coin", "gold", "cash", "softcurrency", "currency", "dollars", "dollar", "balance", "moneycount", "coincount", "totalmoney"];
+	var MONEY_KEYS = ["playermoney", "currentmoney", "currentcoins", "currentcoin", "currentgold", "money", "coins", "coin", "gold", "cash", "balance", "currency", "softcurrency", "softmoney"];
 	var SKIP_RE = /cost|price|best|max|high|require|horsepower|powerpreference/;
 
 	var params = new URLSearchParams(location.search || "");
@@ -274,13 +274,13 @@
 			var raw = origGetItem(META_KEY);
 			if (!raw) return;
 			var o = JSON.parse(raw);
-			if (o && o.expectedUpdatedAt) state.expectedUpdatedAt = String(o.expectedUpdatedAt);
+			if (o && String(o.gid || "") === String(gid || "") && o.expectedUpdatedAt) state.expectedUpdatedAt = String(o.expectedUpdatedAt);
 		} catch (e) { /* ignore */ }
 	}
 
 	function saveMeta() {
 		try {
-			origSetItem(META_KEY, JSON.stringify({ expectedUpdatedAt: state.expectedUpdatedAt }));
+			origSetItem(META_KEY, JSON.stringify({ gid: gid, expectedUpdatedAt: state.expectedUpdatedAt }));
 		} catch (e) { /* ignore */ }
 	}
 
@@ -306,10 +306,19 @@
 		window.__gvLsPatched = true;
 		var proto = Storage.prototype;
 		var protoSet = proto.setItem;
+		var protoGet = proto.getItem;
 		var protoRemove = proto.removeItem;
 		proto.setItem = function (key, value) {
 			protoSet.call(this, key, value);
 			if (this === localStorage) rememberLocalKey(key, value);
+		};
+		proto.getItem = function (key) {
+			var value = protoGet.call(this, key);
+			if (this === localStorage && value != null && !skipStorageKey(key)) {
+				rememberLocalKey(key, value);
+				if (debugSave) gvLog("GV_LS_READ", String(key));
+			}
+			return value;
 		};
 		proto.removeItem = function (key) {
 			protoRemove.call(this, key);
@@ -870,9 +879,13 @@
 	}
 
 	function historyUnreadable(res) {
-		if (!res || !res.ok || res.data == null) return true;
-		if (res.data.raw && Object.keys(res.data).length === 1) return true;
-		return false;
+		if (!res || !res.ok) return true;
+		if (res.data && res.data.raw && Object.keys(res.data).length === 1) return true;
+		var text = String(res.text || "").trim();
+		if (!text || text === "null") return false;
+		var dug = digHistory(res.data);
+		if (dug.meta) return false;
+		return /Record|files|ygSave|ygSaves|MetaData|metadata/.test(text);
 	}
 
 	function buildPayload(files, extraText) {
@@ -1011,8 +1024,9 @@
 	}
 
 	function pollAndMaybeSave() {
-		if (!state.cloudActive || !state.seedApplied || state.resetting || state.seeding || state.idbBroken || state.pollBusy || saveOff) return;
+		if (!state.cloudActive || !state.seedApplied || state.resetting || state.seeding || state.pollBusy || saveOff) return;
 		if (document.hidden) return;
+		if (state.idbBroken) { if (state.dirty) flushSave(false); return; }
 		state.pollBusy = true;
 		readStamp().then(function (sig) {
 			if (state.lastStamp == null) {
@@ -1030,7 +1044,7 @@
 	}
 
 	function startLoop() {
-		if (state.loopStarted || !state.cloudActive || state.idbBroken) return;
+		if (state.loopStarted || !state.cloudActive) return;
 		state.loopStarted = true;
 		setInterval(pollAndMaybeSave, 10000);
 		document.addEventListener("visibilitychange", function () {
@@ -1049,6 +1063,16 @@
 				clearTimeout(timer);
 				reject(e);
 			});
+		});
+	}
+
+	function loadHistorySafe(attempt) {
+		return loadHistorySafe(0).then(function (res) {
+			return res;
+		}).catch(function (err) {
+			if (attempt >= 1) throw err;
+			gvLog("GV_LOAD_RETRY", err && err.message ? err.message : err);
+			return loadHistorySafe(attempt + 1);
 		});
 	}
 
@@ -1100,7 +1124,7 @@
 	}
 
 	function init() {
-		gvLog("GV_BUILD", 2);
+		gvLog("GV_BUILD", 3);
 		state.gameDir = "/idbfs/" + md5Hex(documentDirUrl());
 		gvLog("GV_GAMEDIR", state.gameDir);
 		if (saveOff) {
@@ -1117,9 +1141,7 @@
 		}
 		state.cloudActive = true;
 		gvLog("Cloud sync active (production)");
-		return withTimeout(getHistory(), 5000).then(function (res) {
-			gvLog("GV_LOAD_RAW", res.status, String(res.text || "").slice(0, 300));
-			if (historyUnreadable(res)) throw new Error("history unreadable");
+		return loadHistorySafe(0).then(function (res) {
 			var dug = digHistory(res.data);
 			if (dug.updatedAt) {
 				state.expectedUpdatedAt = dug.updatedAt;
