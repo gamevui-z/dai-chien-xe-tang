@@ -7,7 +7,7 @@
 	var META_KEY = "gv_tank_meta";
 	var MAX_SMALL = 524288;
 	var MAX_RECORD_CHARS = 500000;
-	var MONEY_KEYS = ["playermoney", "currentmoney", "currentcoins", "currentcoin", "currentgold", "money", "coins", "coin", "gold", "cash", "balance", "currency", "softcurrency", "softmoney"];
+	var MONEY_KEYS = ["playermoney", "currentmoney", "currentcoins", "currentcoin", "currentgold", "currentcash", "money", "coins", "coin", "gold", "cash", "balance", "currency", "softcurrency", "softmoney", "credits", "credit", "gems", "gem", "bucks", "buck", "dollars", "dollar"];
 	var SKIP_RE = /cost|price|best|max|high|require|horsepower|powerpreference/;
 
 	var params = new URLSearchParams(location.search || "");
@@ -32,6 +32,7 @@
 		gameDir: "",
 		ygSave: "",
 		scoreKey: "",
+		prefsValues: {},
 		localKeys: {},
 		lastStamp: null,
 		needInitialPush: false,
@@ -320,14 +321,6 @@
 			}
 			return value;
 		};
-		proto.getItem = function (key) {
-			var value = protoGet.call(this, key);
-			if (this === localStorage && value != null && !skipStorageKey(key)) {
-				rememberLocalKey(key, value);
-				if (debugSave) gvLog("GV_LS_READ", String(key));
-			}
-			return value;
-		};
 		proto.removeItem = function (key) {
 			protoRemove.call(this, key);
 			if (this !== localStorage || state.seeding || state.resetting || skipStorageKey(key)) return;
@@ -420,6 +413,8 @@
 
 	function findMoney(extraText) {
 		var acc = { pri: -1, val: 0, key: "" };
+		walkMoney(state.prefsValues, acc, 0);
+		if (acc.pri >= 0) return acc;
 		if (state.ygSave) {
 			try { walkMoney(JSON.parse(state.ygSave), acc, 0); } catch (e) { walkMoney(state.ygSave, acc, 0); }
 		}
@@ -637,6 +632,58 @@
 		});
 	}
 
+	function parseUnityPrefs(bytes) {
+		var out = {};
+		try {
+			var u8 = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes || 0);
+			if (u8.length < 16) return out;
+			var sig = "";
+			for (var si = 0; si < 8; si++) sig += String.fromCharCode(u8[si]);
+			if (sig !== "UnityPrf") return out;
+			var view = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+			var off = 16;
+			function ascii(start, len) {
+				var v = "";
+				for (var ai = 0; ai < len; ai++) v += String.fromCharCode(u8[start + ai]);
+				return v;
+			}
+			while (off < u8.length) {
+				var keyLen = u8[off++];
+				if (!keyLen || off + keyLen + 1 > u8.length) break;
+				var key = ascii(off, keyLen); off += keyLen;
+				var type = u8[off++], val;
+				if (type === 0xFE) {
+					if (off + 4 > u8.length) break;
+					val = view.getInt32(off, true); off += 4;
+				} else if (type === 0xFD) {
+					if (off + 4 > u8.length) break;
+					val = view.getFloat32(off, true); off += 4;
+				} else {
+					var len = type;
+					if (type === 0x80) {
+						if (off + 4 > u8.length) break;
+						len = view.getUint32(off, true); off += 4;
+					}
+					if (type > 0x80 && type < 0xFD || type === 0xFF || off + len > u8.length) break;
+					val = ascii(off, len); off += len;
+				}
+				out[key] = val;
+			}
+		} catch (e) { return {}; }
+		return out;
+	}
+
+	function logPrefsCandidates(map) {
+		var rows = [];
+		for (var k in map) {
+			if (!Object.prototype.hasOwnProperty.call(map, k)) continue;
+			var v = map[k];
+			if (typeof v !== "number" || !isFinite(v)) continue;
+			if (/money|coin|gold|cash|credit|currency|gem|dollar|buck|score/i.test(k)) rows.push(k + "=" + v);
+		}
+		gvLog("GV_PREFS_MONEY", rows.length ? rows.join(",") : "none");
+	}
+
 	function readFilesForUpload() {
 		return withStore("readonly", function (store) {
 			var pack = { files: [], prefsText: "" };
@@ -654,6 +701,9 @@
 					if (keep) {
 						var u8 = contents instanceof Uint8Array ? contents : new Uint8Array(contents);
 						if (/\/PlayerPrefs$/.test(key)) {
+							state.prefsValues = parseUnityPrefs(u8);
+							logPrefsCandidates(state.prefsValues);
+							refreshMoney();
 							pack.prefsText = bytesToLatin1(u8);
 							if (debugSave) {
 								var hex = "";
@@ -750,6 +800,7 @@
 			state.localKeys = {};
 			state.ygSave = "";
 			state.money = 0;
+			state.prefsValues = {};
 		} finally {
 			state.seeding = false;
 		}
@@ -886,6 +937,28 @@
 		return false;
 	}
 
+	function hasExplicitEmptyMeta(obj, depth) {
+		if (depth == null) depth = 0;
+		if (obj == null || depth > 6 || typeof obj !== "object") return false;
+		if (Object.prototype.toString.call(obj) === "[object Array]") {
+			for (var i = 0; i < obj.length; i++) if (hasExplicitEmptyMeta(obj[i], depth + 1)) return true;
+			return false;
+		}
+		var metaKeys = ["MetaData", "metadata", "metaData"];
+		for (var m = 0; m < metaKeys.length; m++) {
+			var mk = metaKeys[m];
+			if (!Object.prototype.hasOwnProperty.call(obj, mk)) continue;
+			var mv = obj[mk];
+			if (mv == null || mv === "" || mv === "null") return true;
+		}
+		var wrapKeys = ["data", "Data", "result", "Result", "d"];
+		for (var w = 0; w < wrapKeys.length; w++) {
+			var k = wrapKeys[w];
+			if (obj[k] != null && hasExplicitEmptyMeta(obj[k], depth + 1)) return true;
+		}
+		return false;
+	}
+
 	function historyUnreadable(res) {
 		if (!res || !res.ok) return true;
 		if (res.data && res.data.raw && Object.keys(res.data).length === 1) return true;
@@ -893,7 +966,9 @@
 		if (!text || text === "null") return false;
 		var dug = digHistory(res.data);
 		if (dug.meta) return false;
-		return /Record|files|ygSave|ygSaves|MetaData|metadata/.test(text);
+		if (/Record|files|ygSave|ygSaves/.test(text)) return true;
+		if (hasExplicitEmptyMeta(res.data, 0)) return false;
+		return /MetaData|metadata|metaData/.test(text);
 	}
 
 	function buildPayload(files, extraText) {
@@ -1134,7 +1209,7 @@
 	}
 
 	function init() {
-		gvLog("GV_BUILD", 3);
+		gvLog("GV_BUILD", 4);
 		state.gameDir = "/idbfs/" + md5Hex(documentDirUrl());
 		gvLog("GV_GAMEDIR", state.gameDir);
 		if (saveOff) {
