@@ -1,6 +1,8 @@
 name: Apply score v7
 on:
-  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/apply-score-v7.yml'
 permissions:
   contents: write
 jobs:
