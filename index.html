@@ -10,7 +10,7 @@
         <!-- <script type="text/javascript">document.domain = '4399.com'</script> -->
 		<title>Đại chiến xe tăng</title>
 		<script type="text/javascript" src="//www.gamevui.com/games/services/score.min.js?fullscreen=0"></script>
-		<script type="text/javascript" src="gamevui-save.js?v=4"></script>
+		<script type="text/javascript" src="gamevui-save.js?v=5"></script>
         <style>
             /* Убираем выделение по нажатию клавиш */
             canvas:focus {
@@ -207,6 +207,7 @@
                         progressBarFull.style.width = `${100 * progress}%`;
                     }).then((unityInstance) => {
                         myGameInstance = unityInstance;
+                        window.__gvUnityInstance = unityInstance;
                         loadingCover.style.display = "none";
                         canvas.style.backgroundImage = "none";
                         if (window.GamevuiSave && GamevuiSave.burstSync) GamevuiSave.burstSync();

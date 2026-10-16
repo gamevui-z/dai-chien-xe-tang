@@ -392,8 +392,10 @@
 			var v = node[k];
 			var skipped = SKIP_RE.test(lk);
 			var pri = MONEY_KEYS.indexOf(lk);
-			if (!skipped && pri >= 0 && (typeof v === "number" || (typeof v === "string" && v !== "" && isFinite(Number(v))))) {
-				takeMoney(acc, String(k), pri, Number(v));
+			var numeric = typeof v === "number" || (typeof v === "string" && v !== "" && isFinite(Number(v)));
+			var moneyish = /money|coin|gold|cash|credit|currency|gem|buck|dollar/.test(lk);
+			if (!skipped && numeric && (pri >= 0 || moneyish)) {
+				takeMoney(acc, String(k), pri >= 0 ? pri : 100, Number(v));
 			} else if (v && typeof v === "object") {
 				walkMoney(v, acc, depth + 1);
 			}
@@ -409,6 +411,54 @@
 			if (m && (best == null || i < best.pri)) best = { pri: i, key: MONEY_KEYS[i], val: Number(m[1]) };
 		}
 		return best;
+	}
+
+	function moneyishFromRaw(text) {
+		if (!text) return null;
+		var re = /[\"']?([^\"'\r\n,:=]{0,50}(?:money|coin|gold|cash|credit|currency|gem|buck|dollar)[^\"'\r\n,:=]{0,50})[\"']?\s*[:=]\s*[\"']?(-?\d+(?:\.\d+)?)/ig;
+		var m, best = null;
+		while ((m = re.exec(String(text)))) {
+			var key = String(m[1] || '').trim();
+			var lk = key.toLowerCase();
+			if (!key || SKIP_RE.test(lk)) continue;
+			var n = Number(m[2]);
+			if (!isFinite(n) || n < 0) continue;
+			if (!best || n > best.val) best = { pri: 100, key: key, val: n };
+		}
+		return best;
+	}
+
+	function logLocalMoneyCandidates() {
+		var rows = [];
+		for (var k in state.localKeys) {
+			if (!Object.prototype.hasOwnProperty.call(state.localKeys, k)) continue;
+			var hit = moneyishFromRaw(state.localKeys[k]);
+			if (hit) rows.push(k + ':' + hit.key + '=' + hit.val);
+		}
+		gvLog('GV_LS_MONEY', rows.length ? rows.join(',') : 'none');
+	}
+
+	function requestUnityFsSync() {
+		return new Promise(function (resolve) {
+			var inst = window.__gvUnityInstance;
+			var mod = inst && inst.Module;
+			try {
+				if (mod && mod.FS && typeof mod.FS.syncfs === 'function') {
+					gvLog('GV_UNITY_FS_SYNC','FS');
+					mod.FS.syncfs(false, function () { resolve(); });
+					setTimeout(resolve, 1200);
+					return;
+				}
+				if (mod && typeof mod._JS_FileSystem_Sync === 'function') {
+					gvLog('GV_UNITY_FS_SYNC','JS_FileSystem_Sync');
+					mod._JS_FileSystem_Sync();
+					setTimeout(resolve, 1100);
+					return;
+				}
+			} catch (e) { }
+			gvLog('GV_UNITY_FS_SYNC','unavailable');
+			setTimeout(resolve, 50);
+		});
 	}
 
 	function findMoney(extraText) {
@@ -429,6 +479,15 @@
 		}
 		if (extraText) {
 			raw = moneyFromRaw(extraText);
+			if (raw) return raw;
+			raw = moneyishFromRaw(extraText);
+			if (raw) return raw;
+		}
+		raw = moneyishFromRaw(state.ygSave);
+		if (raw) return raw;
+		for (var rk in state.localKeys) {
+			if (!Object.prototype.hasOwnProperty.call(state.localKeys, rk)) continue;
+			raw = moneyishFromRaw(state.localKeys[rk]);
 			if (raw) return raw;
 		}
 		return null;
@@ -703,6 +762,7 @@
 						if (/\/PlayerPrefs$/.test(key)) {
 							state.prefsValues = parseUnityPrefs(u8);
 							logPrefsCandidates(state.prefsValues);
+							logLocalMoneyCandidates();
 							refreshMoney();
 							pack.prefsText = bytesToLatin1(u8);
 							if (debugSave) {
@@ -1209,7 +1269,7 @@
 	}
 
 	function init() {
-		gvLog("GV_BUILD", 4);
+		gvLog("GV_BUILD", 5);
 		state.gameDir = "/idbfs/" + md5Hex(documentDirUrl());
 		gvLog("GV_GAMEDIR", state.gameDir);
 		if (saveOff) {
@@ -1345,25 +1405,27 @@
 	}
 
 	function readMoney() {
-		refreshMoney();
-		if (state.money) {
-			logScore();
-			return Promise.resolve(scoreNumber(state.money));
-		}
-		if (state.idbBroken || saveOff || !state.gameDir) {
-			logScore();
-			return Promise.resolve(0);
-		}
-		return readFilesForUpload().then(function (pack) {
+		return requestUnityFsSync().then(function () {
+			refreshMoney();
+			if (state.money) {
+				logScore();
+				return scoreNumber(state.money);
+			}
+			if (state.idbBroken || saveOff || !state.gameDir) {
+				logScore();
+				return 0;
+			}
+			return readFilesForUpload().then(function (pack) {
 			if (pack.prefsText) {
 				refreshMoney(pack.prefsText);
 				debugSaveText("GV_PREFS_KEYS", pack.prefsText);
 			}
 			logScore();
 			return scoreNumber(state.money);
-		}).catch(function () {
-			logScore();
-			return scoreNumber(state.money);
+			}).catch(function () {
+				logScore();
+				return scoreNumber(state.money);
+			});
 		});
 	}
 
