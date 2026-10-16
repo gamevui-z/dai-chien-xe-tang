@@ -1,1 +1,0 @@
-(function(){"use strict";var G=window.__GV3;G.hasYg=function(){return !!G.state.ygSave;};})();
