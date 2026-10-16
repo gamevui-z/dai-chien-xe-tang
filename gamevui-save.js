@@ -1269,7 +1269,7 @@
 	}
 
 	function init() {
-		gvLog("GV_BUILD", 5);
+		gvLog("GV_BUILD", 6);
 		state.gameDir = "/idbfs/" + md5Hex(documentDirUrl());
 		gvLog("GV_GAMEDIR", state.gameDir);
 		if (saveOff) {
