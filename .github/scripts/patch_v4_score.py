@@ -13,7 +13,7 @@ if needle not in s: raise SystemExit('findMoney anchor missing')
 s = s.replace(needle,repl,1)
 
 anchor = '''\tfunction readFilesForUpload() {'''
-parser = r'''\tfunction parseUnityPrefs(bytes) {
+parser = '''\tfunction parseUnityPrefs(bytes) {
 \t\tvar out = {};
 \t\ttry {
 \t\t\tvar u8 = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes || 0);
