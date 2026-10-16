@@ -5788,10 +5788,13 @@ code.google.com/p/crypto-js/wiki/License
         }
     };
     function _JS_FileSystem_Initialize() {
-        if (typeof window !== "undefined") window.__gvUnityFsSync = function(done) {
+        if (typeof window !== "undefined") {
+            window.__gvUnityFS = FS;
+            window.__gvUnityFsSync = function(done) {
             try { fs.sync(false); Module.setTimeout(function(){ if (typeof done === "function") done(); }, 1300); return true }
             catch (e) { try { if (typeof done === "function") done(e); } catch (e2) {} return false }
-        };
+            };
+        }
         Module.setInterval(function() {
             fs.sync(true)
         }, fs.syncInternal)

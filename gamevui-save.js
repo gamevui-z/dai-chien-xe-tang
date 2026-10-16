@@ -34,6 +34,7 @@
 		scoreKey: "",
 		prefsValues: {},
 		prevPrefsRaw: null,
+		persistedMoney: null,
 		localKeys: {},
 		lastStamp: null,
 		needInitialPush: false,
@@ -429,6 +430,45 @@
 		return best;
 	}
 
+	function scanUnityFsMoney() {
+		var fs = window.__gvUnityFS;
+		if (!fs || typeof fs.readdir !== 'function' || typeof fs.stat !== 'function' || typeof fs.readFile !== 'function') { gvLog('GV_FS_SCAN','unavailable'); return null; }
+		var best = null, rows = [], seen = {}, files = 0;
+		function take(hit, path) {
+			if (!hit || !isFinite(Number(hit.val)) || Number(hit.val) < 0) return;
+			var cand = { pri: hit.pri == null ? 100 : Number(hit.pri), key: 'fs:' + path + ':' + String(hit.key || ''), val: Number(hit.val) };
+			if (!best || cand.pri < best.pri || (cand.pri === best.pri && Number(best.val) <= 0 && cand.val > 0)) best = cand;
+		}
+		function walk(path, depth) {
+			if (depth > 5 || files > 160 || seen[path]) return;
+			seen[path] = true;
+			var names;
+			try { names = fs.readdir(path); } catch (e) { return; }
+			for (var i = 0; i < names.length && files <= 160; i++) {
+				var name = names[i]; if (name === '.' || name === '..') continue;
+				var full = path === '/' ? '/' + name : path + '/' + name, st;
+				try { st = fs.stat(full); } catch (e2) { continue; }
+				var isDir = false;
+				try { isDir = fs.isDir ? fs.isDir(st.mode) : false; } catch (e3) {}
+				if (isDir) { if (!/^\/(proc|dev|sys)(\/|$)/.test(full)) walk(full, depth + 1); continue; }
+				files++;
+				var size = Number(st.size || 0); rows.push(full + '#' + size);
+				if (size <= 0 || size > 524288) continue;
+				try {
+					var bytes = fs.readFile(full, { encoding: 'binary' });
+					var text = bytesToLatin1(bytes);
+					var hit = moneyFromRaw(text) || moneyishFromRaw(text);
+					take(hit, full);
+				} catch (e4) {}
+			}
+		}
+		walk('/', 0);
+		gvLog('GV_FS_MAP', rows.length ? rows.join(',') : 'none');
+		state.persistedMoney = best;
+		if (best) gvLog('GV_FS_MONEY', 'key=' + best.key, 'value=' + scoreNumber(best.val)); else gvLog('GV_FS_MONEY','none');
+		return best;
+	}
+
 	function logLocalMoneyCandidates() {
 		var rows = [];
 		for (var k in state.localKeys) {
@@ -436,6 +476,7 @@
 			var hit = moneyishFromRaw(state.localKeys[k]);
 			if (hit) rows.push(k + ':' + hit.key + '=' + hit.val);
 		}
+		gvLog('GV_LS_KEYS', Object.keys(state.localKeys).join(',') || 'none');
 		gvLog('GV_LS_MONEY', rows.length ? rows.join(',') : 'none');
 	}
 
@@ -472,6 +513,7 @@
 	}
 
 	function findMoney(extraText) {
+		if (state.persistedMoney && Number(state.persistedMoney.val) > 0) return state.persistedMoney;
 		var acc = { pri: -1, val: 0, key: "" };
 		walkMoney(state.prefsValues, acc, 0);
 		if (acc.pri >= 0) return acc;
@@ -1293,7 +1335,7 @@
 	}
 
 	function init() {
-		gvLog("GV_BUILD", 8);
+		gvLog("GV_BUILD", 9);
 		state.gameDir = "/idbfs/" + md5Hex(documentDirUrl());
 		gvLog("GV_GAMEDIR", state.gameDir);
 		if (saveOff) {
@@ -1430,6 +1472,7 @@
 
 	function readMoney() {
 		return requestUnityFsSync().then(function () {
+			scanUnityFsMoney();
 			refreshMoney();
 			if (state.money) {
 				logScore();
@@ -1536,6 +1579,7 @@
 		document.getElementById("gv-send-score-btn").addEventListener("click", function (e) {
 			stop(e);
 			readMoney().then(function (n) {
+				gvLog("GV_SCORE_SUBMIT", n);
 				try {
 					if (typeof GV !== "undefined" && GV) new GV().saveScore(n);
 				} catch (err) { /* ignore */ }
