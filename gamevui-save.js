@@ -33,6 +33,7 @@
 		ygSave: "",
 		scoreKey: "",
 		prefsValues: {},
+		prevPrefsRaw: null,
 		localKeys: {},
 		lastStamp: null,
 		needInitialPush: false,
@@ -741,6 +742,16 @@
 		return out;
 	}
 
+	function copyPrefsBytes(bytes) { var s=bytes instanceof Uint8Array?bytes:new Uint8Array(bytes||0),o=new Uint8Array(s.length); o.set(s); return o; }
+	function i32le(b,o) { if(!b||o<0||o+4>b.length)return null; return new DataView(b.buffer,b.byteOffset,b.byteLength).getInt32(o,true); }
+	function logPrefsByteDelta(a,b) {
+		if(!a||!a.length){ gvLog("GV_PREFS_BYTE_DELTA","baseline","bytes="+(b?b.length:0)); return; }
+		var n=Math.min(a.length,b.length), seen={}, changed=0, rows=[];
+		for(var i=0;i<n;i++) if(a[i]!==b[i]){ changed++; for(var d=-3;d<=0;d++){var x=i+d;if(x>=0&&x+4<=n)seen[x]=1;} }
+		for(var k in seen){ var x=Number(k),v1=i32le(a,x),v2=i32le(b,x); if(v1===v2)continue; if(v1>=0&&v2>=0&&v1<=1000000000&&v2<=1000000000){ rows.push("off="+x+":"+v1+"->"+v2); if(rows.length>=80)break; } }
+		gvLog("GV_PREFS_BYTE_DELTA","changed="+changed,rows.length?rows.join(","):"no-i32-candidate");
+	}
+
 	function logPrefsCandidates(map) {
 		var rows = [];
 		for (var k in map) {
@@ -769,6 +780,8 @@
 					if (keep) {
 						var u8 = contents instanceof Uint8Array ? contents : new Uint8Array(contents);
 						if (/\/PlayerPrefs$/.test(key)) {
+							logPrefsByteDelta(state.prevPrefsRaw,u8);
+							state.prevPrefsRaw=copyPrefsBytes(u8);
 							state.prefsValues = parseUnityPrefs(u8);
 							logPrefsCandidates(state.prefsValues);
 							logLocalMoneyCandidates();
@@ -826,7 +839,9 @@
 			if (!f || f.dir) continue;
 			var path = remapPath(f.p, oldPrefix);
 			if (!inGameDir(path)) continue;
-			mapped.push({ path: path, mode: f.m || 33206, bytes: base64ToBytes(f.d || "") });
+			var mb=base64ToBytes(f.d || "");
+			mapped.push({ path:path, mode:f.m||33206, bytes:mb });
+			if (/\/PlayerPrefs$/.test(path)) { state.prevPrefsRaw=copyPrefsBytes(mb); gvLog("GV_PREFS_BYTE_BASELINE","bytes="+mb.length); }
 			var slash = path.lastIndexOf("/");
 			if (slash > 0) dirs[path.substring(0, slash)] = true;
 			dirs[state.gameDir] = true;
@@ -1278,7 +1293,7 @@
 	}
 
 	function init() {
-		gvLog("GV_BUILD", 7);
+		gvLog("GV_BUILD", 8);
 		state.gameDir = "/idbfs/" + md5Hex(documentDirUrl());
 		gvLog("GV_GAMEDIR", state.gameDir);
 		if (saveOff) {
