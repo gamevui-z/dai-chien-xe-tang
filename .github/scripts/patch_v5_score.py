@@ -3,16 +3,13 @@ from pathlib import Path
 p=Path('gamevui-save.js')
 s=p.read_text()
 
-# Build/cache marker.
 s=s.replace('gvLog("GV_BUILD", 4);','gvLog("GV_BUILD", 5);',1)
 
-# Broaden money-key matching while still excluding prices/high scores/etc.
 old='''\t\t\tvar pri = MONEY_KEYS.indexOf(lk);\n\t\t\tif (!skipped && pri >= 0 && (typeof v === "number" || (typeof v === "string" && v !== "" && isFinite(Number(v))))) {\n\t\t\t\ttakeMoney(acc, String(k), pri, Number(v));\n\t\t\t} else if (v && typeof v === "object") {'''
 new='''\t\t\tvar pri = MONEY_KEYS.indexOf(lk);\n\t\t\tvar numeric = typeof v === "number" || (typeof v === "string" && v !== "" && isFinite(Number(v)));\n\t\t\tvar moneyish = /money|coin|gold|cash|credit|currency|gem|buck|dollar/.test(lk);\n\t\t\tif (!skipped && numeric && (pri >= 0 || moneyish)) {\n\t\t\t\ttakeMoney(acc, String(k), pri >= 0 ? pri : 100, Number(v));\n\t\t\t} else if (v && typeof v === "object") {'''
 if old not in s: raise SystemExit('walkMoney block missing')
 s=s.replace(old,new,1)
 
-# Raw localStorage/text fallback for keys such as "Zone 1Currency".
 anchor='''\tfunction findMoney(extraText) {'''
 helper=r'''\tfunction moneyishFromRaw(text) {
 \t\tif (!text) return null;
@@ -62,20 +59,17 @@ helper=r'''\tfunction moneyishFromRaw(text) {
 \t\t});
 \t}
 
-'''
+'''.replace('\\t','\t')
 if anchor not in s: raise SystemExit('findMoney anchor missing')
 s=s.replace(anchor,helper+anchor,1)
 
-# Extend raw fallback.
 old2='''\t\tif (extraText) {\n\t\t\traw = moneyFromRaw(extraText);\n\t\t\tif (raw) return raw;\n\t\t}\n\t\treturn null;'''
 new2='''\t\tif (extraText) {\n\t\t\traw = moneyFromRaw(extraText);\n\t\t\tif (raw) return raw;\n\t\t\traw = moneyishFromRaw(extraText);\n\t\t\tif (raw) return raw;\n\t\t}\n\t\traw = moneyishFromRaw(state.ygSave);\n\t\tif (raw) return raw;\n\t\tfor (var rk in state.localKeys) {\n\t\t\tif (!Object.prototype.hasOwnProperty.call(state.localKeys, rk)) continue;\n\t\t\traw = moneyishFromRaw(state.localKeys[rk]);\n\t\t\tif (raw) return raw;\n\t\t}\n\t\treturn null;'''
 if old2 not in s: raise SystemExit('findMoney tail missing')
 s=s.replace(old2,new2,1)
 
-# Log local candidates when PlayerPrefs is read.
 s=s.replace('''\t\t\t\t\t\t\tlogPrefsCandidates(state.prefsValues);\n\t\t\t\t\t\t\trefreshMoney();''','''\t\t\t\t\t\t\tlogPrefsCandidates(state.prefsValues);\n\t\t\t\t\t\t\tlogLocalMoneyCandidates();\n\t\t\t\t\t\t\trefreshMoney();''',1)
 
-# On score click, try syncing live Unity FS first, then read persisted prefs.
 old3='''\tfunction readMoney() {\n\t\trefreshMoney();\n\t\tif (state.money) {\n\t\t\tlogScore();\n\t\t\treturn Promise.resolve(scoreNumber(state.money));\n\t\t}\n\t\tif (state.idbBroken || saveOff || !state.gameDir) {\n\t\t\tlogScore();\n\t\t\treturn Promise.resolve(0);\n\t\t}\n\t\treturn readFilesForUpload().then(function (pack) {'''
 new3='''\tfunction readMoney() {\n\t\treturn requestUnityFsSync().then(function () {\n\t\t\trefreshMoney();\n\t\t\tif (state.money) {\n\t\t\t\tlogScore();\n\t\t\t\treturn scoreNumber(state.money);\n\t\t\t}\n\t\t\tif (state.idbBroken || saveOff || !state.gameDir) {\n\t\t\t\tlogScore();\n\t\t\t\treturn 0;\n\t\t\t}\n\t\t\treturn readFilesForUpload().then(function (pack) {'''
 if old3 not in s: raise SystemExit('readMoney head missing')
