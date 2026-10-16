@@ -320,6 +320,14 @@
 			}
 			return value;
 		};
+		proto.getItem = function (key) {
+			var value = protoGet.call(this, key);
+			if (this === localStorage && value != null && !skipStorageKey(key)) {
+				rememberLocalKey(key, value);
+				if (debugSave) gvLog("GV_LS_READ", String(key));
+			}
+			return value;
+		};
 		proto.removeItem = function (key) {
 			protoRemove.call(this, key);
 			if (this !== localStorage || state.seeding || state.resetting || skipStorageKey(key)) return;
@@ -1067,7 +1075,9 @@
 	}
 
 	function loadHistorySafe(attempt) {
-		return loadHistorySafe(0).then(function (res) {
+		return withTimeout(getHistory(), 5000).then(function (res) {
+			gvLog("GV_LOAD_RAW", res.status, String(res.text || "").slice(0, 300));
+			if (historyUnreadable(res)) throw new Error("history unreadable");
 			return res;
 		}).catch(function (err) {
 			if (attempt >= 1) throw err;
