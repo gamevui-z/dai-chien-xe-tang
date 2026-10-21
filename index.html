@@ -235,33 +235,19 @@
                     });
                     }
 
-                    var watchdog = setTimeout(bootUnity, 7000);
-                    var startPromise = (window.GamevuiSave && GamevuiSave.init) ? GamevuiSave.init() : Promise.resolve();
-                    Promise.resolve(startPromise).then(function (result) {
-                        clearTimeout(watchdog);
-                        if (result && result.lateSeed)
-                        {
-                            try
-                            {
-                                if (!sessionStorage.getItem("gv_seed_reload"))
-                                {
-                                    sessionStorage.setItem("gv_seed_reload", "1");
-                                    if (window.__gvLog) window.__gvLog("GV_SEED_RELOAD");
-                                    var url = new URL(location.href);
-                                    url.searchParams.set("_gv", String(Date.now()));
-                                    location.replace(url.toString());
-                                    return;
-                                }
-                            }
-                            catch (e) { }
-                        }
-                        else
-                        {
-                            try { sessionStorage.removeItem("gv_seed_reload"); } catch (e2) { }
-                        }
+                    // Chỉ khởi động Unity sau khi cloud đã được đọc và IDBFS đã được seed.
+                    // Không dùng watchdog 7 giây: GetHistoryGame có thể cần 2 lần x 5 giây.
+                    var startPromise;
+                    try {
+                        startPromise = (window.GamevuiSave && GamevuiSave.init) ? GamevuiSave.init() : Promise.resolve();
+                    } catch (error) {
+                        if (window.__gvLog) window.__gvLog("GV_SYNC_INIT_ERROR", error && error.message);
+                        startPromise = Promise.resolve();
+                    }
+                    Promise.resolve(startPromise).then(function () {
                         bootUnity();
-                    }).catch(function () {
-                        clearTimeout(watchdog);
+                    }).catch(function (error) {
+                        if (window.__gvLog) window.__gvLog("GV_SYNC_INIT_ERROR", error && error.message);
                         bootUnity();
                     });
 

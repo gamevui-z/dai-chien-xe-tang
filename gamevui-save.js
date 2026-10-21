@@ -1057,9 +1057,11 @@
 	function recordHasData(meta) {
 		if (!meta || !meta.Record || typeof meta.Record !== "object") return false;
 		var record = meta.Record;
-		if (ygTextFromRecord(record)) return true;
-		if (record.files && record.files.length) return true;
-		if (record.localKeys && Object.keys(record.localKeys).length) return true;
+		// Bản cloud đã reset vẫn là dữ liệu có thẩm quyền: phải seed để xóa
+		// PlayerPrefs cũ trên các máy khác, tránh dữ liệu đã xóa bị hồi sinh.
+		if (record.__version__ != null || Array.isArray(record.files)) return true;
+		if (Object.prototype.hasOwnProperty.call(record, "ygSave") || Object.prototype.hasOwnProperty.call(record, "ygSaves")) return true;
+		if (Object.prototype.hasOwnProperty.call(record, "localKeys")) return true;
 		return false;
 	}
 
@@ -1119,11 +1121,9 @@
 		};
 		var json = JSON.stringify(payload);
 		if (json.length > MAX_RECORD_CHARS) {
-			payload.Record.files = kept.filter(function (f) { return f && /\/PlayerPrefs$/.test(f.p || ""); });
-			json = JSON.stringify(payload);
-		}
-		if (json.length > MAX_RECORD_CHARS) {
-			payload.Record.localKeys = {};
+			// Không tự ý bỏ file hoặc localKeys: sẽ làm mất tiến trình trên máy khác.
+			gvLog("GV_SAVE_TOO_LARGE", json.length);
+			throw new Error("GameVui save payload exceeds safe size limit");
 		}
 		var prefs = false;
 		var outFiles = payload.Record.files || [];
@@ -1161,11 +1161,16 @@
 
 	function pushSave(keepalive) {
 		if (!state.cloudActive || !state.seedApplied || state.resetting || saveOff) return Promise.resolve(false);
-		var read = state.idbBroken ? Promise.resolve({ files: [], prefsText: "" }) : readFilesForUpload().catch(function () {
+		// Unity sử dụng IDBFS để lưu native save: lỗi đọc không được biến thành
+		// payload có files=[] rồi ghi đè bản cloud đầy đủ.
+		if (state.idbBroken) {
+			gvLog("GV_SAVE_SKIPPED", "IDBFS unavailable");
+			return Promise.resolve(false);
+		}
+		return readFilesForUpload().catch(function (err) {
 			state.idbBroken = true;
-			return { files: [], prefsText: "" };
-		});
-		return read.then(function (pack) {
+			throw err;
+		}).then(function (pack) {
 			if (pack.prefsText) refreshMoney(pack.prefsText);
 			var payload = buildPayload(pack.files, pack.prefsText);
 			return saveHistory(payload, state.expectedUpdatedAt, keepalive).then(function (res) {
@@ -1218,7 +1223,7 @@
 
 	function flushSave(keepalive) {
 		if (!state.cloudActive || !state.seedApplied || state.resetting || state.seeding || saveOff) return Promise.resolve(false);
-		if (state.idbBroken && !state.ygSave && !Object.keys(state.localKeys).length) return Promise.resolve(false);
+		if (state.idbBroken) return Promise.resolve(false);
 		if (state.flushing) return Promise.resolve(false);
 		state.flushing = true;
 		return pushSave(!!keepalive).then(function (ok) {
